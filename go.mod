@@ -4,7 +4,7 @@ go 1.25.5
 
 require (
 	github.com/charmbracelet/log v1.0.0
-	github.com/joho/godotenv v1.5.1
+	github.com/julienschmidt/httprouter v1.3.0
 )
 
 require (

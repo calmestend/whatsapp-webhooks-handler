@@ -2,17 +2,25 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/charmbracelet/log"
+	"github.com/julienschmidt/httprouter"
 )
+
+var wg sync.WaitGroup
 
 type WebhookPayload struct {
 	Entry []Entry `json:"entry"`
@@ -170,7 +178,60 @@ func main() {
 	}))
 
 	log.Info("server started", "port", port)
-	if err := http.ListenAndServe(fmt.Sprintf(":%d", port), nil); err != nil {
+	if err := serve(port); err != nil {
 		log.Fatal("server error", "err", err)
 	}
+}
+
+func routes() http.Handler {
+	router := httprouter.New()
+
+	return router
+}
+
+func serve(port int) error {
+	srv := &http.Server{
+		Addr:         fmt.Sprintf(":%d", port),
+		Handler:      routes(),
+		IdleTimeout:  time.Minute,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+	}
+
+	shutdownError := make(chan error)
+
+	go func() {
+		quit := make(chan os.Signal, 1)
+		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+		s := <-quit
+		log.Info("shutting down server", "signal", s.String())
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		err := srv.Shutdown(ctx)
+		if err != nil {
+			shutdownError <- srv.Shutdown(ctx)
+		}
+
+		log.Info("completing background tasks", "addr", srv.Addr)
+		wg.Wait()
+		shutdownError <- nil
+	}()
+
+	log.Info("starting server", "addr", srv.Addr)
+
+	err := srv.ListenAndServe()
+	if !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+
+	err = <-shutdownError
+	if err != nil {
+		return err
+	}
+
+	log.Info("stopped server", "addr", srv.Addr)
+	return nil
 }
