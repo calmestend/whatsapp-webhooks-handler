@@ -1,5 +1,5 @@
 {
-  description = "Whatsapp Webhook";
+  description = "github.com/calmestend/whatsapp-webhooks-handler.git";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -14,15 +14,13 @@
         };
       in {
         devShells.default = pkgs.mkShell {
-          name = "Whatsapp Webhook";
+          name = "github.com/calmestend/whatsapp-webhooks-handler.git";
 
           packages = with pkgs; [
 						go
+						golangci-lint
+						gopls
           ];
-
-          shellHook = ''
-            echo "Whatsapp Webhook dev shell"
-          '';
         };
       }
     );
