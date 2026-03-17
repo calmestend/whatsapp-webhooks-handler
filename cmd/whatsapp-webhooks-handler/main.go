@@ -21,6 +21,9 @@ import (
 )
 
 var wg sync.WaitGroup
+var verifyToken string
+var backendURL string
+var portEnv string
 
 type WebhookPayload struct {
 	Entry []Entry `json:"entry"`
@@ -55,7 +58,6 @@ type BackendPayload struct {
 
 func loggerMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
 		wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 
 		next(wrapped, r)
@@ -64,7 +66,6 @@ func loggerMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", wrapped.statusCode,
-			"duration", time.Since(start),
 			"ip", r.RemoteAddr,
 		)
 	}
@@ -100,13 +101,13 @@ func main() {
 	log.SetTimeFormat(time.RFC3339)
 	log.SetReportCaller(true)
 
-	var verifyToken string
-	var backendURL string
-	var portEnv string
-
 	flag.StringVar(&verifyToken, "verify_token", os.Getenv("WHATSAPP_WEBHOOK_VERIFY_TOKEN"), "Verify Token")
 	flag.StringVar(&backendURL, "backend_url", os.Getenv("WHATSAPP_WEBHOOK_BACKEND_URL"), "Backend URL")
 	flag.StringVar(&portEnv, "port", os.Getenv("WHATSAPP_WEBHOOK_PORT"), "Server Port")
+
+	if verifyToken == "" || backendURL == "" || portEnv == "" {
+		log.Fatal("error getting env variables")
+	}
 
 	port, err := strconv.Atoi(portEnv)
 	if err != nil {
@@ -115,76 +116,79 @@ func main() {
 
 	flag.Parse()
 
-	http.HandleFunc("GET /", loggerMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		query := r.URL.Query()
-		mode := query.Get("hub.mode")
-		challenge := query.Get("hub.challenge")
-		token := query.Get("hub.verify_token")
-
-		if mode == "subscribe" && token == verifyToken {
-			log.Info("webhook verified")
-			w.WriteHeader(http.StatusOK)
-			if _, err := w.Write([]byte(challenge)); err != nil {
-				log.Error("error writting header", "err", err)
-				w.WriteHeader(http.StatusInternalServerError)
-				return
-			}
-		} else {
-			log.Warn("webhook verification failed", "token", token, "mode", mode)
-			w.WriteHeader(http.StatusForbidden)
-		}
-	}))
-
-	http.HandleFunc("POST /", loggerMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			log.Error("error reading body", "err", err)
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		defer r.Body.Close()
-
-		log.Debug("webhook payload received", "body", string(body))
-
-		var payload WebhookPayload
-		if err := json.Unmarshal(body, &payload); err != nil {
-			log.Error("error parsing body", "err", err)
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		for _, entry := range payload.Entry {
-			for _, change := range entry.Changes {
-				if change.Value.Event == "PARTNER_APP_INSTALLED" {
-					log.Info("partner app installed",
-						"waba_id", change.Value.WABAInfo.WABAId,
-						"owner_business_id", change.Value.WABAInfo.OwnerBusinessId,
-						"partner_app_id", change.Value.WABAInfo.PartnerAppId,
-					)
-
-					err := forwardToBackend(backendURL, BackendPayload{
-						WABAId:          change.Value.WABAInfo.WABAId,
-						OwnerBusinessId: change.Value.WABAInfo.OwnerBusinessId,
-						PartnerAppId:    change.Value.WABAInfo.PartnerAppId,
-					})
-					if err != nil {
-						log.Error("error forwarding to backend", "err", err)
-					}
-				}
-			}
-		}
-
-		w.WriteHeader(http.StatusOK)
-	}))
-
 	log.Info("server started", "port", port)
 	if err := serve(port); err != nil {
 		log.Fatal("server error", "err", err)
 	}
 }
 
+func subscribe(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	mode := query.Get("hub.mode")
+	challenge := query.Get("hub.challenge")
+	token := query.Get("hub.verify_token")
+
+	if mode == "subscribe" && token == verifyToken {
+		log.Info("webhook verified")
+		w.WriteHeader(http.StatusOK)
+		if _, err := w.Write([]byte(challenge)); err != nil {
+			log.Error("error writting header", "err", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+	} else {
+		log.Warn("webhook verification failed", "token", token, "mode", mode)
+		w.WriteHeader(http.StatusForbidden)
+	}
+}
+
+func forwarding(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Error("error reading body", "err", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	defer r.Body.Close()
+
+	log.Debug("webhook payload received", "body", string(body))
+
+	var payload WebhookPayload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		log.Error("error parsing body", "err", err)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	for _, entry := range payload.Entry {
+		for _, change := range entry.Changes {
+			if change.Value.Event == "PARTNER_APP_INSTALLED" {
+				log.Info("partner app installed",
+					"waba_id", change.Value.WABAInfo.WABAId,
+					"owner_business_id", change.Value.WABAInfo.OwnerBusinessId,
+					"partner_app_id", change.Value.WABAInfo.PartnerAppId,
+				)
+
+				err := forwardToBackend(backendURL, BackendPayload{
+					WABAId:          change.Value.WABAInfo.WABAId,
+					OwnerBusinessId: change.Value.WABAInfo.OwnerBusinessId,
+					PartnerAppId:    change.Value.WABAInfo.PartnerAppId,
+				})
+				if err != nil {
+					log.Error("error forwarding to backend", "err", err)
+				}
+			}
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 func routes() http.Handler {
 	router := httprouter.New()
+
+	router.HandlerFunc(http.MethodGet , "/webhook/v1", loggerMiddleware(subscribe))
+	router.HandlerFunc(http.MethodPost, "/webhook/v1", loggerMiddleware(forwarding))
 
 	return router
 }
