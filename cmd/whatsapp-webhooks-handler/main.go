@@ -87,14 +87,19 @@ func forwardToBackend(backendUrl string, payload BackendPayload) error {
 		return fmt.Errorf("error marshaling payload: %w", err)
 	}
 
-	resp, err := http.Post(backendUrl, "application/json", bytes.NewBuffer(jsonData))
+	resp, err := http.Post(backendUrl, "application/x-www-form-urlencoded", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return fmt.Errorf("error posting to backend: %w", err)
 	}
 	defer resp.Body.Close()
 
-	log.Info("backend response", "status", resp.StatusCode)
-	return nil
+	respBody, _ := io.ReadAll(resp.Body)
+	log.Info("backend response", 
+	"status", resp.StatusCode,
+	"body", string(respBody),  
+)
+
+return nil
 }
 
 func main() {
@@ -102,8 +107,12 @@ func main() {
 	log.SetReportCaller(true)
 
 	flag.StringVar(&verifyToken, "verify_token", os.Getenv("WHATSAPP_WEBHOOK_VERIFY_TOKEN"), "Verify Token")
-	flag.StringVar(&backendURL, "backend_url", os.Getenv("WHATSAPP_WEBHOOK_BACKEND_URL"), "Backend URL")
+	// flag.StringVar(&backendURL, "backend_url", os.Getenv("WHATSAPP_WEBHOOK_BACKEND_URL"), "Backend URL")
 	flag.StringVar(&portEnv, "port", os.Getenv("WHATSAPP_WEBHOOK_PORT"), "Server Port")
+
+	flag.Parse()
+
+	backendURL = "https://whatsapp-login-cs-production.up.railway.app/FacebookCallback.aspx"
 
 	if verifyToken == "" || backendURL == "" || portEnv == "" {
 		log.Fatal("error getting env variables")
@@ -113,8 +122,6 @@ func main() {
 	if err != nil {
 		log.Fatal("error getting env var", "var", "WHATSAPP_WEBHOOK_PORT", "err", err)
 	}
-
-	flag.Parse()
 
 	log.Info("server started", "port", port)
 	if err := serve(port); err != nil {
