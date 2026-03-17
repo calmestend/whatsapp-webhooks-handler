@@ -92,7 +92,6 @@ func main() {
 	log.SetTimeFormat(time.RFC3339)
 	log.SetReportCaller(true)
 
-
 	var verifyToken string
 	var backendURL string
 	var portEnv string
@@ -117,7 +116,11 @@ func main() {
 		if mode == "subscribe" && token == verifyToken {
 			log.Info("webhook verified")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(challenge))
+			if _, err := w.Write([]byte(challenge)); err != nil {
+				log.Error("error writting header", "err", err)
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
 		} else {
 			log.Warn("webhook verification failed", "token", token, "mode", mode)
 			w.WriteHeader(http.StatusForbidden)
