@@ -107,12 +107,10 @@ func main() {
 	log.SetReportCaller(true)
 
 	flag.StringVar(&verifyToken, "verify_token", os.Getenv("WHATSAPP_WEBHOOK_VERIFY_TOKEN"), "Verify Token")
-	// flag.StringVar(&backendURL, "backend_url", os.Getenv("WHATSAPP_WEBHOOK_BACKEND_URL"), "Backend URL")
+	flag.StringVar(&backendURL, "backend_url", os.Getenv("WHATSAPP_WEBHOOK_BACKEND_URL"), "Backend URL")
 	flag.StringVar(&portEnv, "port", os.Getenv("WHATSAPP_WEBHOOK_PORT"), "Server Port")
 
 	flag.Parse()
-
-	backendURL = "https://whatsapp-login-cs-production.up.railway.app/FacebookCallback.aspx"
 
 	if verifyToken == "" || backendURL == "" || portEnv == "" {
 		log.Fatal("error getting env variables")
