@@ -23,6 +23,7 @@ import (
 var wg sync.WaitGroup
 var verifyToken string
 var backendURL string
+var bearerToken string
 var portEnv string
 
 type WebhookPayload struct {
@@ -81,25 +82,43 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.ResponseWriter.WriteHeader(code)
 }
 
-func forwardToBackend(backendUrl string, payload BackendPayload) error {
+func forwardToBackend(backendURL string, payload BackendPayload) error {
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("error marshaling payload: %w", err)
 	}
 
-	resp, err := http.Post(backendUrl, "application/x-www-form-urlencoded", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest(http.MethodPost, backendURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("error creating request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+bearerToken)
+
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("error posting to backend: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
-	log.Info("backend response", 
-	"status", resp.StatusCode,
-	"body", string(respBody),  
-)
 
-return nil
+	log.Info(
+		"backend response",
+		"status", resp.StatusCode,
+		"body", string(respBody),
+	)
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("backend returned status %d", resp.StatusCode)
+	}
+
+	return nil
 }
 
 func main() {
@@ -108,11 +127,12 @@ func main() {
 
 	flag.StringVar(&verifyToken, "verify_token", os.Getenv("WHATSAPP_WEBHOOK_VERIFY_TOKEN"), "Verify Token")
 	flag.StringVar(&backendURL, "backend_url", os.Getenv("WHATSAPP_WEBHOOK_BACKEND_URL"), "Backend URL")
+	flag.StringVar(&bearerToken, "bearer_token", os.Getenv("WHATSAPP_WEBHOOK_BEARER_TOKEN"), "Bearer Token")
 	flag.StringVar(&portEnv, "port", os.Getenv("WHATSAPP_WEBHOOK_PORT"), "Server Port")
 
 	flag.Parse()
 
-	if verifyToken == "" || backendURL == "" || portEnv == "" {
+	if verifyToken == "" || backendURL == "" || bearerToken == "" || portEnv == "" {
 		log.Fatal("error getting env variables")
 	}
 
