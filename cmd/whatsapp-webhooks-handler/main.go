@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httputil"
 	"os"
 	"os/signal"
 	"strconv"
@@ -168,6 +169,20 @@ func subscribe(w http.ResponseWriter, r *http.Request) {
 }
 
 func forwarding(w http.ResponseWriter, r *http.Request) {
+	dump, dumpErr := httputil.DumpRequest(r, true)
+	if dumpErr != nil {
+		log.Error("error dumping request", "err", dumpErr)
+	} else {
+		log.Info("meta webhook request received",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"query", r.URL.RawQuery,
+			"remote_addr", r.RemoteAddr,
+			"headers", r.Header,
+			"raw_request", string(dump),
+		)
+	}
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Error("error reading body", "err", err)
